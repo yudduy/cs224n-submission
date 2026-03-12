@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""E-103: SFT Ablation — Does correction data have unique training value?
+"""SFT Ablation — Does correction data have unique training value?
 
 3-way comparison:
   Model A: ~636 clean traces from goldilocks train problems
@@ -8,22 +8,22 @@
 
 Usage:
   # Step 1: Prepare data (CPU, local)
-  python e103_sft_ablation.py prep \
-    --rollouts-file data/exit_pipeline_results/rollouts.jsonl \
-    --corrections-file data/analysis/e102_results/corrections_max.jsonl \
-    --output-dir data/sft_data/e103
+  python sft_ablation.py prep \
+    --rollouts-file data/rollouts.jsonl \
+    --corrections-file data/corrections_max.jsonl \
+    --output-dir data/sft_data
 
-  # Step 2: Train (GPU, Mithril)
-  python e103_sft_ablation.py train \
-    --data-dir /path/to/e103 \
+  # Step 2: Train (GPU)
+  python sft_ablation.py train \
+    --data-dir data/sft_data \
     --model-variant A \
-    --output-dir /mnt/local/e103_models
+    --output-dir /path/to/models
 
-  # Step 3: Evaluate (GPU, Mithril)
-  python e103_sft_ablation.py eval \
-    --data-dir /path/to/e103 \
-    --model-dir /mnt/local/e103_models/model_A \
-    --output-dir /mnt/local/e103_eval
+  # Step 3: Evaluate (GPU)
+  python sft_ablation.py eval \
+    --data-dir data/sft_data \
+    --model-dir /path/to/models/model_A \
+    --output-dir /path/to/eval
 """
 
 from __future__ import annotations
@@ -37,7 +37,6 @@ import sys
 import time
 from collections import defaultdict
 from pathlib import Path
-from typing import Any
 
 import numpy as np
 
@@ -46,9 +45,7 @@ CORRECTION_RATIO = 0.20  # Target: 20% corrections in Model B mix
 MAX_SEQ_LENGTH = 4096
 N_RECOVERY_ROLLOUTS = 15  # Maximize prefixes per problem for statistical power
 
-# ═══════════════════════════════════════════════════════════════════
-# Answer Extraction (from E-102)
-# ═══════════════════════════════════════════════════════════════════
+# Answer Extraction
 
 def extract_boxed(text: str) -> str | None:
     """Extract last \\boxed{...} content, handling nested braces."""
@@ -67,7 +64,6 @@ def extract_boxed(text: str) -> str | None:
 
 
 def extract_clean_answer(text: str) -> str | None:
-    """Extract answer: try \\boxed{} first, then last number."""
     ans = extract_boxed(text)
     if ans is not None:
         return ans
@@ -76,26 +72,21 @@ def extract_clean_answer(text: str) -> str | None:
 
 
 def answers_match(a: str | None, b: str | None) -> bool:
-    """Check if two answers match (normalize whitespace, case)."""
     if a is None or b is None:
         return False
     a_clean = re.sub(r"\s+", "", a.lower().strip())
     b_clean = re.sub(r"\s+", "", b.lower().strip())
     if a_clean == b_clean:
         return True
-    # Try numeric comparison
     try:
         return abs(float(a_clean) - float(b_clean)) < 1e-6
     except (ValueError, OverflowError):
         return False
 
 
-# ═══════════════════════════════════════════════════════════════════
 # Step 1: Data Preparation
-# ═══════════════════════════════════════════════════════════════════
 
 def load_rollouts(path: str) -> list[dict]:
-    """Load rollouts.jsonl, return list of problem dicts."""
     data = []
     with open(path) as f:
         for line in f:
@@ -104,7 +95,6 @@ def load_rollouts(path: str) -> list[dict]:
 
 
 def load_corrections(path: str) -> list[dict]:
-    """Load corrections JSONL, return list of correction dicts."""
     data = []
     with open(path) as f:
         for line in f:
@@ -115,26 +105,18 @@ def load_corrections(path: str) -> list[dict]:
 def create_problem_split(
     rollouts: list[dict], seed: int = SEED
 ) -> tuple[list[int], list[int], list[int]]:
-    """Create stratified train/val/test split by problem.
-
-    Returns (train_idxs, val_idxs, test_idxs) — problem_idx values.
-    Split: 106 train / 15 val / 20 test from 141 goldilocks problems.
-    Stratified by difficulty level.
-    """
+    """Stratified train/val/test split (106/15/20) from goldilocks problems."""
     rng = random.Random(seed)
 
-    # Collect goldilocks problems grouped by level
     by_level: dict[int, list[int]] = defaultdict(list)
     for r in rollouts:
         nc = r["n_correct"]
         if 1 <= nc <= 7:
             by_level[r["level"]].append(r["problem_idx"])
 
-    # Sort within each level for reproducibility
     for level in by_level:
         by_level[level].sort()
 
-    # Stratified split: proportional allocation per level
     train_idxs, val_idxs, test_idxs = [], [], []
     total_gold = sum(len(v) for v in by_level.values())
 
@@ -142,12 +124,10 @@ def create_problem_split(
         problems = by_level[level][:]
         rng.shuffle(problems)
         n = len(problems)
-        # Proportional allocation
         n_test = max(1, round(20 * n / total_gold))
         n_val = max(1, round(15 * n / total_gold))
         n_train = n - n_test - n_val
         if n_train < 1:
-            # Very small level — put all in train
             n_train = n
             n_val = 0
             n_test = 0
@@ -162,18 +142,13 @@ def create_problem_split(
 
 
 def format_chat(problem: str, solution: str) -> str:
-    """Format as Qwen3 ChatML template (non-thinking mode).
-
-    Qwen3 defaults to thinking mode. For non-thinking SFT, we use the standard
-    ChatML format without <think> tags. The model should learn to respond directly.
-    """
+    """Format as Qwen3 ChatML (non-thinking mode)."""
     return f"<|im_start|>user\n{problem}<|im_end|>\n<|im_start|>assistant\n{solution}<|im_end|>"
 
 
 def build_clean_traces(
     rollouts: list[dict], problem_idxs: set[int]
 ) -> list[dict]:
-    """Extract clean (correct) traces from rollouts for given problems."""
     traces = []
     for r in rollouts:
         if r["problem_idx"] not in problem_idxs:
@@ -374,10 +349,8 @@ def build_recovery_eval_data(
 
 
 def cmd_prep(args):
-    """Prepare all data for E-103."""
-    print("=" * 60)
-    print("E-103 SFT Ablation — Data Preparation")
-    print("=" * 60)
+    """Prepare all data for SFT ablation."""
+    print("SFT Ablation — Data Preparation")
 
     rollouts = load_rollouts(args.rollouts_file)
     corrections = load_corrections(args.corrections_file)
@@ -513,15 +486,11 @@ def save_jsonl(data: list[dict], path: Path):
             f.write(json.dumps(d, ensure_ascii=False) + "\n")
 
 
-# ═══════════════════════════════════════════════════════════════════
 # Step 2: Training (Unsloth + TRL)
-# ═══════════════════════════════════════════════════════════════════
 
 def cmd_train(args):
     """Train one model variant (A, B, or C)."""
-    print("=" * 60)
-    print(f"E-103 SFT Ablation — Training Model {args.model_variant}")
-    print("=" * 60)
+    print(f"SFT Ablation — Training Model {args.model_variant}")
 
     variant = args.model_variant.upper()
     assert variant in ("A", "B", "C"), f"Invalid variant: {variant}"
@@ -544,15 +513,9 @@ def cmd_train(args):
     n_corr = sum(1 for d in train_data if d.get("source") == "correction")
     print(f"  Clean: {n_clean}, Corrections: {n_corr}")
 
-    # Import training dependencies (GPU-only)
-    try:
-        from unsloth import FastLanguageModel
-        from trl import SFTConfig, SFTTrainer
-        from datasets import Dataset
-    except ImportError as e:
-        print(f"Missing dependency: {e}")
-        print("Install: pip install unsloth trl datasets")
-        sys.exit(1)
+    from unsloth import FastLanguageModel
+    from trl import SFTConfig, SFTTrainer
+    from datasets import Dataset
 
     # Verify tokenizer tokens
     print("\nLoading Qwen3-8B with QLoRA...")
@@ -661,15 +624,11 @@ def cmd_train(args):
     print(json.dumps(log, indent=2))
 
 
-# ═══════════════════════════════════════════════════════════════════
 # Step 3: Evaluation
-# ═══════════════════════════════════════════════════════════════════
 
 def cmd_eval(args):
     """Evaluate a trained model on recovery@1, pass@1, over-triggering."""
-    print("=" * 60)
-    print(f"E-103 SFT Ablation — Evaluation")
-    print("=" * 60)
+    print(f"SFT Ablation — Evaluation")
 
     data_dir = Path(args.data_dir)
     model_dir = Path(args.model_dir)
@@ -931,15 +890,11 @@ def _eval_hf(model_dir, recovery_data, scratch_data, output_dir, eval_set):
     return results
 
 
-# ═══════════════════════════════════════════════════════════════════
 # Step 4: Compare all models
-# ═══════════════════════════════════════════════════════════════════
 
 def cmd_compare(args):
     """Compare evaluation results across all 3 models. Apply kill criteria."""
-    print("=" * 60)
-    print("E-103 SFT Ablation — Model Comparison")
-    print("=" * 60)
+    print("SFT Ablation — Model Comparison")
 
     eval_dir = Path(args.eval_dir)
     eval_set = args.eval_set
@@ -1036,15 +991,11 @@ def cmd_compare(args):
     print(f"\nComparison saved to {eval_dir / f'comparison_{eval_set}.json'}")
 
 
-# ═══════════════════════════════════════════════════════════════════
 # Step 3b: Base Model Evaluation (no SFT)
-# ═══════════════════════════════════════════════════════════════════
 
 def cmd_eval_base(args):
     """Evaluate unmodified Qwen3-8B as a baseline."""
-    print("=" * 60)
-    print("E-103 SFT Ablation — Base Model Evaluation")
-    print("=" * 60)
+    print("SFT Ablation — Base Model Evaluation")
 
     from vllm import LLM, SamplingParams
 
@@ -1120,12 +1071,10 @@ def cmd_eval_base(args):
     print(json.dumps(results, indent=2))
 
 
-# ═══════════════════════════════════════════════════════════════════
 # CLI
-# ═══════════════════════════════════════════════════════════════════
 
 def main():
-    parser = argparse.ArgumentParser(description="E-103 SFT Ablation")
+    parser = argparse.ArgumentParser(description="SFT Ablation")
     sub = parser.add_subparsers(dest="command", required=True)
 
     # Prep

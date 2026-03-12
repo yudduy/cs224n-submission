@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""E-104: Step-DPO with Divergence-Depth Selection.
+"""Step-DPO with Divergence-Depth Selection.
 
 Key insight: Divergence depth as zero-cost proxy for step-level pair quality.
 Late-divergence pairs share longer correct prefixes → more concentrated
@@ -7,8 +7,8 @@ gradient signal at the actual decision point (Step-DPO prefix cancellation).
 
 3-condition ablation (all Step-DPO, varying PAIR SELECTION):
   Cond 1: Random subset of all pairs (dataset size control)
-  Cond 2: Late-divergence pairs only (E-102 fuzzy depth > 10%) — OUR METHOD
-  Cond 3: Early-divergence pairs only (E-102 fuzzy depth ≤ 10%) — expected-worse
+  Cond 2: Late-divergence pairs only (fuzzy depth > 10%)
+  Cond 3: Early-divergence pairs only (fuzzy depth ≤ 10%)
 
 Step-DPO format:
   prompt  = ChatML(problem) + shared_prefix[:div_point]
@@ -20,30 +20,30 @@ This compensates for shorter sequences having less room for log-prob divergence.
 
 Pipeline:
   Step 0: Score (GPU) — measure model uncertainty per pair → kill test
-  Step 1: Prep (CPU) — build Step-DPO pairs for 3 conditions from E-102 data
-  Step 2: Train (GPU) — Step-DPO on E-103 Model A checkpoint, 3 conditions
+  Step 1: Prep (CPU) — build Step-DPO pairs for 3 conditions from correction data
+  Step 2: Train (GPU) — Step-DPO on SFT Model A checkpoint, 3 conditions
   Step 3: Eval (GPU) — MATH-500 pass@1 + diagnostics
 
 Usage:
   # Step 1: Prepare Step-DPO pairs (CPU, local)
-  python e104_divergence_dpo.py prep \
-    --rollouts-file data/exit_pipeline_results/rollouts.jsonl \
-    --corrections-file data/analysis/e102_results/corrections_max.jsonl \
-    --output-dir data/dpo_data/e104
+  python divergence_dpo.py prep \
+    --rollouts-file data/rollouts.jsonl \
+    --corrections-file data/corrections_max.jsonl \
+    --output-dir data/dpo_data
 
-  # Step 2: Train (GPU, Mithril) — requires E-103 Model A checkpoint
-  python e104_divergence_dpo.py train \
-    --data-dir data/dpo_data/e104 \
-    --sft-model-dir /mnt/local/e103_models/model_a/merged \
+  # Step 2: Train (GPU) — requires SFT Model A checkpoint
+  python divergence_dpo.py train \
+    --data-dir data/dpo_data \
+    --sft-model-dir /path/to/sft_models/model_a/merged \
     --condition 2 \
     --beta 0.3 \
-    --output-dir /mnt/local/e104_models
+    --output-dir /path/to/dpo_models
 
-  # Step 3: Evaluate (GPU, Mithril)
-  python e104_divergence_dpo.py eval \
-    --model-dir /mnt/local/e104_models/cond2_beta0.3 \
-    --data-dir data/dpo_data/e104 \
-    --output-dir /mnt/local/e104_eval
+  # Step 3: Evaluate (GPU)
+  python divergence_dpo.py eval \
+    --model-dir /path/to/dpo_models/cond2_beta0.3 \
+    --data-dir data/dpo_data \
+    --output-dir /path/to/dpo_eval
 """
 
 from __future__ import annotations
@@ -58,7 +58,6 @@ import sys
 import time
 from collections import defaultdict
 from pathlib import Path
-from typing import Any
 
 import numpy as np
 
@@ -75,9 +74,7 @@ def format_chatml_response(text: str) -> str:
     """Format response with ChatML end token."""
     return f"{text}<|im_end|>"
 
-# ═══════════════════════════════════════════════════════════════════
-# Answer Extraction (shared with E-102, E-103)
-# ═══════════════════════════════════════════════════════════════════
+# Answer Extraction
 
 def extract_boxed(text: str) -> str | None:
     """Extract last \\boxed{...} content, handling nested braces."""
@@ -117,58 +114,29 @@ def answers_match(a: str | None, b: str | None) -> bool:
 
 
 
-# ═══════════════════════════════════════════════════════════════════
 # Step 1: DPO Pair Construction
-# ═══════════════════════════════════════════════════════════════════
 
 def build_dpo_pairs(rollouts_data: list[dict],
                     corrections_data: list[dict],
                     uncertainty_scores: dict[str, dict] | None = None,
                     ) -> dict[str, list[dict]]:
-    """Build Step-DPO pairs for all conditions.
-
-    DESIGN (Step-DPO with divergence-guided pair selection):
-    Each pair uses the prefix up to the divergence point as part of the prompt.
-    The chosen response is the correction suffix (from E-102), and the rejected
-    response is the wrong suffix from the original rollout. This concentrates
-    the DPO gradient on the decision boundary at the divergence point.
-
-    Conditions:
-      Cond1: Random subset of all pairs (size control)
-      Cond2: Late-divergence pairs only (E-102 fuzzy depth > 10%) — OUR METHOD
-      Cond3: If uncertainty_scores provided: top-576 by μ(1-μ) (Cond3u).
-             Otherwise: random subset (backward compat).
-      Cond4: Early-divergence pairs only (E-102 fuzzy depth ≤ 10%)
-      Cond5: All annotated pairs with continuous divergence-depth weighting
-             (sigmoid-weighted resampling to target_size)
-
-    All conditions subsampled to the SAME pair count for fair comparison.
-
-    Returns dict with keys: cond1, cond2, cond3, cond4, cond5
-    """
+    """Build Step-DPO pairs for 5 conditions varying pair selection strategy."""
     random.seed(SEED)
     np.random.seed(SEED)
 
-    # Index corrections by (problem_idx, rollout_id)
-    # corrections_max.jsonl has multiple entries per key (one per reference rollout).
-    # Select the best CORRECT correction per key (prefer higher div_depth for richer prefix).
     corrections_by_key = {}
     for c in corrections_data:
         key = (c["problem_idx"], c["rollout_id"])
         if not c.get("correction_correct", False):
-            # Only consider correct corrections
             if key not in corrections_by_key:
-                corrections_by_key[key] = c  # fallback: keep even incorrect if no other
+                corrections_by_key[key] = c
             continue
         prev = corrections_by_key.get(key)
         if prev is None or not prev.get("correction_correct", False):
-            # First correct correction for this key
             corrections_by_key[key] = c
         elif c["div_depth"] > prev["div_depth"]:
-            # Prefer deeper divergence (richer prefix)
             corrections_by_key[key] = c
 
-    # Index rollout text by (problem_idx, rollout_id)
     rollout_text_by_key = {}
     for prob in rollouts_data:
         for r in prob["rollouts"]:
@@ -194,7 +162,6 @@ def build_dpo_pairs(rollouts_data: list[dict],
             inc_text = inc_r["text"]
             inc_id = inc_r["rollout_id"]
 
-            # Get E-102 correction data (required for Step-DPO)
             corr_key = (problem_idx, inc_id)
             corr_info = corrections_by_key.get(corr_key)
             if corr_info is None:
@@ -238,18 +205,18 @@ def build_dpo_pairs(rollouts_data: list[dict],
 
     print(f"Total candidate pairs: {len(all_pairs)}")
 
-    # E-102 divergence depth distribution
+    # Divergence depth distribution
     depths = [p["metadata"]["e102_div_depth"] for p in all_pairs]
-    print(f"E-102 fuzzy divergence depth:")
+    print(f"Fuzzy divergence depth:")
     print(f"  Mean: {np.mean(depths):.3f}, Median: {np.median(depths):.3f}")
     print(f"  25th: {np.percentile(depths, 25):.3f}, "
           f"75th: {np.percentile(depths, 75):.3f}")
 
-    # ─── Filter out unannotated pairs (no E-102 data) ───
+    # ─── Filter out unannotated pairs (no divergence annotation) ───
     annotated_pairs = [p for p in all_pairs if p["metadata"]["n_refs"] > 0]
     n_unannotated = len(all_pairs) - len(annotated_pairs)
     if n_unannotated > 0:
-        print(f"WARNING: {n_unannotated} pairs have no E-102 annotation — "
+        print(f"WARNING: {n_unannotated} pairs have no divergence annotation — "
               f"excluded from cond2/cond4")
 
     # ─── Condition 2: Late divergence pairs (depth > 10%) ───
@@ -396,9 +363,7 @@ def save_jsonl(data: list[dict], path: Path):
 
 def cmd_prep(args):
     """Build DPO pairs for all 5 conditions."""
-    print("=" * 60)
-    print("E-104 Divergence-DPO — Data Preparation")
-    print("=" * 60)
+    print("Divergence-DPO — Data Preparation")
 
     # Load data
     print(f"Loading rollouts from {args.rollouts_file}...")
@@ -498,9 +463,7 @@ def cmd_prep(args):
     print(json.dumps(summary, indent=2))
 
 
-# ═══════════════════════════════════════════════════════════════════
 # Step 0: Score — Measure model uncertainty per pair (KILL TEST)
-# ═══════════════════════════════════════════════════════════════════
 
 def cmd_score(args):
     """Score DPO pairs with SFT model to measure uncertainty.
@@ -513,9 +476,7 @@ def cmd_score(args):
     KILL TEST: If E[μ(1-μ) | Cond2] ≤ E[μ(1-μ) | Cond4], the Active DPO
     reframing fails — divergence depth does NOT proxy for informativeness.
     """
-    print("=" * 60)
-    print("E-104 Divergence-DPO — Score (Kill Test)")
-    print("=" * 60)
+    print("Divergence-DPO — Score (Kill Test)")
 
     data_dir = Path(args.data_dir)
     output_dir = Path(args.output_dir)
@@ -545,13 +506,8 @@ def cmd_score(args):
     pair_list = list(unique_pairs.items())
     print(f"Unique pairs to score: {len(pair_list)}")
 
-    # Load SFT model
-    try:
-        import torch
-        from transformers import AutoModelForCausalLM, AutoTokenizer
-    except ImportError as e:
-        print(f"Missing dependency: {e}")
-        sys.exit(1)
+    import torch
+    from transformers import AutoModelForCausalLM, AutoTokenizer
 
     print(f"\nLoading SFT model from {args.sft_model_dir}...")
     tokenizer = AutoTokenizer.from_pretrained(args.sft_model_dir)
@@ -653,9 +609,7 @@ def cmd_score(args):
     print(f"\nScores saved to {scores_file}")
 
     # ─── Kill test analysis ───
-    print("\n" + "=" * 60)
     print("KILL TEST: E[μ(1-μ) | Cond2] vs E[μ(1-μ) | Cond4]")
-    print("=" * 60)
 
     # Group strictly by condition field to avoid mixing Cond1/3 pairs
     # into late/early buckets
@@ -695,22 +649,10 @@ def cmd_score(args):
                   f"std={np.std(vals):.4f}, n={len(vals)}")
 
 
-# ═══════════════════════════════════════════════════════════════════
 # Step 2: DPO Training
-# ═══════════════════════════════════════════════════════════════════
 
 class GradientDiagnosticsCallback:
-    """Lightweight gradient logging: norm + direction consistency between steps.
-
-    Uses Trainer's logged grad_norm (computed before zero_grad) and tracks
-    direction consistency via accumulated parameter deltas between steps.
-    Saved to gradient_diagnostics.jsonl in the output directory.
-
-    NOTE: TrainerCallback.on_log does NOT receive model kwarg, and gradients
-    are zeroed before on_log fires. We extract grad_norm from Trainer's own
-    logs (which computes it pre-zero) and approximate direction consistency
-    from parameter deltas instead.
-    """
+    """Logs grad_norm + parameter delta direction consistency."""
 
     def __init__(self, output_dir: str):
         self.output_dir = Path(output_dir)
@@ -719,11 +661,8 @@ class GradientDiagnosticsCallback:
         self.records = []
 
     def on_log(self, args, state, control, logs=None, model=None, **kwargs):
-        """Extract grad_norm from Trainer's logs + compute param delta cosine."""
         if logs is None:
             return
-
-        # Trainer already logs grad_norm (computed before zero_grad)
         grad_norm = logs.get("grad_norm")
 
         record = {
@@ -735,11 +674,6 @@ class GradientDiagnosticsCallback:
         self.records.append(record)
 
     def compute_param_delta(self, model, step):
-        """Compute parameter delta direction consistency.
-
-        Called manually at checkpoints to compare parameter movement direction
-        between consecutive intervals. Cheaper than per-step grad capture.
-        """
         try:
             import torch
             current_params = torch.cat([
@@ -752,7 +686,6 @@ class GradientDiagnosticsCallback:
                 if self.prev_delta is not None:
                     cos_sim = (torch.dot(delta, self.prev_delta) /
                                (delta.norm() * self.prev_delta.norm() + 1e-8)).item()
-                    # Update the last record with cosine similarity
                     if self.records:
                         self.records[-1]["param_delta_cos"] = cos_sim
                 self.prev_delta = delta.clone()
@@ -773,9 +706,7 @@ def cmd_train(args):
     """Train DPO on a specific condition."""
     condition = args.condition
     beta = args.beta
-    print("=" * 60)
-    print(f"E-104 Divergence-DPO — Training Condition {condition} (β={beta})")
-    print("=" * 60)
+    print(f"Divergence-DPO — Training Condition {condition} (β={beta})")
 
     data_dir = Path(args.data_dir)
     sft_model_dir = args.sft_model_dir
@@ -804,7 +735,7 @@ def cmd_train(args):
         print("Install: pip install unsloth trl datasets")
         sys.exit(1)
 
-    # Load SFT model as base (E-103 Model A)
+    # Load SFT model as base (SFT Model A)
     print(f"\nLoading SFT base model from {sft_model_dir}...")
     model, tokenizer = FastLanguageModel.from_pretrained(
         sft_model_dir,
@@ -987,15 +918,11 @@ def cmd_train(args):
     print(json.dumps(log, indent=2))
 
 
-# ═══════════════════════════════════════════════════════════════════
 # Step 3: Evaluation
-# ═══════════════════════════════════════════════════════════════════
 
 def cmd_eval(args):
     """Evaluate a DPO-trained model on MATH-500."""
-    print("=" * 60)
-    print(f"E-104 Divergence-DPO — Evaluation")
-    print("=" * 60)
+    print(f"Divergence-DPO — Evaluation")
 
     model_dir = Path(args.model_dir)
     data_dir = Path(args.data_dir)
@@ -1083,9 +1010,7 @@ def cmd_eval(args):
 
 def cmd_compare(args):
     """Compare all conditions."""
-    print("=" * 60)
-    print("E-104 Divergence-DPO — Comparison")
-    print("=" * 60)
+    print("Divergence-DPO — Comparison")
 
     eval_dir = Path(args.eval_dir)
     results = {}
@@ -1226,7 +1151,7 @@ def cmd_compare(args):
         "conditions": {k: v for k, v in results.items()},
         "mcnemar_tests": mcnemar_results,
         "experiment": {
-            "name": "e104-step-dpo-divergence-depth",
+            "name": "step-dpo-divergence-depth",
             "description": "Step-DPO with divergence-depth-guided pair selection",
             "beta": 0.2,
             "loss_type": "sigmoid",
@@ -1240,12 +1165,10 @@ def cmd_compare(args):
     print(f"\nComparison saved to {eval_dir / 'comparison.json'}")
 
 
-# ═══════════════════════════════════════════════════════════════════
 # CLI
-# ═══════════════════════════════════════════════════════════════════
 
 def main():
-    parser = argparse.ArgumentParser(description="E-104: Divergence-Aligned DPO")
+    parser = argparse.ArgumentParser(description="Divergence-Aligned DPO")
     subparsers = parser.add_subparsers(dest="command")
 
     # Score (kill test)
@@ -1254,7 +1177,7 @@ def main():
     p_score.add_argument("--data-dir", required=True,
                          help="Directory with cond*_train/val.jsonl files")
     p_score.add_argument("--sft-model-dir", required=True,
-                         help="E-103 Model A checkpoint directory")
+                         help="SFT Model A checkpoint directory")
     p_score.add_argument("--output-dir", required=True,
                          help="Where to write uncertainty_scores.jsonl")
 
@@ -1271,7 +1194,7 @@ def main():
     p_train = subparsers.add_parser("train", help="Train DPO")
     p_train.add_argument("--data-dir", required=True)
     p_train.add_argument("--sft-model-dir", required=True,
-                         help="E-103 Model A checkpoint directory")
+                         help="SFT Model A checkpoint directory")
     p_train.add_argument("--condition", type=int, required=True, choices=[1,2,3,4,5])
     p_train.add_argument("--beta", type=float, default=0.2)
     p_train.add_argument("--learning-rate", type=float, default=5e-6)
