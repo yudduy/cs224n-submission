@@ -80,8 +80,8 @@ An ablation (\S\ref{sec:analysis}) traces the correction failure to the failed-r
 
 Three bodies of prior work are relevant: preference data construction, error-position identification in reasoning, and the failure modes of self-correction training.
 
-On the data side, Khaki et al.~\cite{datasalgorithm2025} make the provocative claim that the dataset \emph{is} the algorithm---that DPO outcomes depend more on how pairs are constructed than on optimizer details.
-Ivison et al.~\cite{unpackingdpo2024} and Liu et al.~\cite{whatmatters2025} provide supporting evidence from different angles: sampling strategy and chosen-response quality, respectively.
+On the data side, Djuhera et al.~\cite{datasalgorithm2025} argue that the dataset \emph{is} the algorithm---that DPO outcomes depend more on how pairs are constructed than on optimizer details.
+Ivison et al.~\cite{unpackingdpo2024} and Pan et al.~\cite{whatmatters2025} provide supporting evidence from different angles: sampling strategy and chosen-response quality, respectively.
 Our experiments were not designed to test this, but the correction-vs-rollout split is a concrete case where data construction flips the outcome sign.
 
 For error-position identification, we build on Step-DPO~\cite{lai2024stepdpo}, which uses GPT-4o to find the first wrong step and generate a correction.
@@ -102,8 +102,8 @@ It was not---correction pairs degraded performance in all 3 of our conditions, a
 
 \subsection{Rollout Generation and Filtering}
 
-We evaluate Qwen3-8B~\cite{qwen3_2026} on MATH-500~\cite{hendrycks2021math}.
-For each of the 500 problems, we generate $N = 8$ rollouts using vLLM with temperature $T = 0.7$.
+We evaluate Qwen3-8B~\cite{qwen3_2025} on MATH-500~\cite{hendrycks2021math}.
+For each of the 500 problems, we generate $N = 8$ rollouts using vLLM~\cite{kwon2023vllm} with temperature $T = 0.7$.
 We retain problems where at least one rollout is correct and at least one is incorrect ($1 \leq n_{\text{correct}} < N$), since constructing preference pairs requires both outcomes.
 This yields 141 problems (28.2\%); the remaining 311 (62.2\%) are solved by all rollouts and 48 (9.6\%) by none.
 
@@ -149,13 +149,13 @@ After mixed-outcome filtering ($1 \leq n_{\text{correct}} \leq 7$ out of 8 rollo
 \subsection{Evaluation Method}
 
 We evaluate greedy pass@1 ($T = 0$) on all 500 problems.
-Each condition is compared against its base model using McNemar's test~\cite{demsar2006}, which counts problems where exactly one model is correct and tests whether those disagreements are one-sided.
-Within each experiment we apply Benjamini-Hochberg correction.
+Each condition is compared against its base model using McNemar's test~\cite{mcnemar1947}, which counts problems where exactly one model is correct and tests whether those disagreements are one-sided; Dem\v{s}ar~\cite{demsar2006} recommends this test for paired classifier comparisons on shared evaluation sets.
+Within each experiment we apply Benjamini-Hochberg correction~\cite{benjamini1995} to control the false discovery rate across multiple comparisons.
 Because individual comparisons are underpowered at this scale, we also report the sign test~\cite{demsar2006} over the full set of conditions to check directional consistency.
 
 \subsection{Experimental Details}
 
-All experiments use Qwen3-8B with QLoRA~\cite{dettmers2023qlora} ($r = 64$, $\alpha = 128$).
+All experiments use Qwen3-8B with QLoRA~\cite{dettmers2023qlora} (LoRA~\cite{hu2022lora}, $r = 64$, $\alpha = 128$).
 The two experiments use different training pipelines:
 \begin{itemize}
     \item \textbf{Correction DPO}: starts from an SFT checkpoint (Qwen3-8B fine-tuned on 465 clean traces, 77.4\% pass@1), $\beta = 0.2$, learning rate $5 \times 10^{-6}$, 3 epochs, 189 pairs per condition.
@@ -288,7 +288,7 @@ Stripping the prefix removes this confound and the correction data stops hurting
 In rollout pairs, both sides come from the same sampling process (same temperature, same model, no injected text).
 Both the chosen and rejected responses come from the same sampling process, so neither contains injected text or external edits.
 The chosen response happens to be correct, but stylistically it is indistinguishable from the model's normal output.
-Liu et al.~\cite{whatmatters2025} argue that chosen-response quality is what drives DPO gains; rollout pairs satisfy that without the distributional artifacts we see in corrections.
+Pan et al.~\cite{whatmatters2025} argue that chosen-response quality is what drives DPO gains; rollout pairs satisfy that without the distributional artifacts we see in corrections.
 
 \paragraph{Shared-prefix cancellation.}
 In the rollout-based setup, the chosen and rejected responses share an identical prefix up to the divergence point (Figure~\ref{fig:gradient}).
@@ -377,7 +377,7 @@ Token entropy measures next-token uncertainty, not whether the branch actually l
 
 \paragraph{Phase C: Fork detection via hidden states.}
 We tested five methods for single-pass fork detection (Table~\ref{tab:detection_app}).
-None exceeded a position-only baseline (AUROC = 0.901).
+None exceeded a position-only baseline (AUROC, area under the receiver operating characteristic curve, $= 0.901$).
 The best probe (AUROC = 0.802) was picking up on the fact that forks tend to occur at certain depths, not on what makes a position a fork; with more data or larger models the hidden-state signal might become separable, but we could not demonstrate it here.
 
 \begin{table}[h]

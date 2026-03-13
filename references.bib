@@ -8,15 +8,15 @@
 
 % === Core method ===
 @article{deepgrpo2026,
-  title={{DEEP-GRPO}: Depth-Guided Expert Policy Optimization for Mathematical Reasoning},
-  author={Li, Zhenyu and Wang, Yixin and Zhang, Kai and Liu, Yang},
+  title={Deep Dense Exploration for {LLM} Reinforcement Learning via Pivot-Driven Resampling},
+  author={Guo, Yiran and Qiao, Zhongjian and Xie, Yingqi and Liu, Jie and Ye, Dan and Zhang, Ruiqing and Qiu, Shuang and Xu, Lijie},
   journal={arXiv preprint arXiv:2602.14169},
   year={2026}
 }
 
 @article{shao2024grpo,
   title={{DeepSeekMath}: Pushing the Limits of Mathematical Reasoning in Open Language Models},
-  author={Shao, Zhihong and Wang, Peiyi and Zhu, Qihao and Xu, Runxin and Song, Junxiao and Zhang, Mingchuan and Li, Y.K. and Wu, Y. and Guo, Daya},
+  author={Shao, Zhihong and Wang, Peiyi and Zhu, Qihao and Xu, Runxin and Song, Junxiao and Bi, Xiao and Zhang, Haowei and Zhang, Mingchuan and Li, Y.K. and Wu, Y. and Guo, Daya},
   journal={arXiv preprint arXiv:2402.03300},
   year={2024}
 }
@@ -24,15 +24,16 @@
 % === Self-correction ===
 @article{kumar2024score,
   title={Training Language Models to Self-Correct via Reinforcement Learning},
-  author={Kumar, Aviral and Du, Yuqing and Guu, Kelvin and Agarwal, Rishabh},
+  author={Kumar, Aviral and Zhuang, Vincent and Agarwal, Rishabh and Su, Yi and Co-Reyes, John D and Singh, Avi and Baumli, Kate and Iqbal, Shariq and Bishop, Colton and Roelofs, Rebecca and Zhang, Lei M and McKinney, Kay and Shrivastava, Disha and Paduraru, Cosmin and Tucker, George and Precup, Doina and Behbahani, Feryal and Faust, Aleksandra},
   journal={ICLR},
-  year={2025}
+  year={2025},
+  note={arXiv:2409.12917}
 }
 
 % === RLVR, collapse, and diversity ===
 @article{wang2025beyond,
-  title={Beyond the 80/20 Rule: High-Entropy Tokens Drive {RLVR} Learning},
-  author={Wang, Yixin and Li, Zhenyu and Zhang, Kai},
+  title={Beyond the 80/20 Rule: High-Entropy Minority Tokens Drive Effective Reinforcement Learning for {LLM} Reasoning},
+  author={Wang, Shenzhi and Yu, Le and Gao, Chang and Zheng, Chujie and Liu, Shixuan and Lu, Rui and Dang, Kai and Chen, Xionghui and Yang, Jianxin and Zhang, Zhenru and Liu, Yuqiong and Yang, An and Zhao, Andrew and Yue, Yang and Song, Shiji and Yu, Bowen and Huang, Gao and Lin, Junyang},
   journal={arXiv preprint arXiv:2506.01939},
   year={2025}
 }
@@ -46,10 +47,19 @@
 }
 
 @article{lai2024stepdpo,
-  title={Step-{DPO}: Step-level Preference Optimization for Long-Chain Reasoning of {LLMs}},
-  author={Lai, Xin and Tian, Yuxuan and Chen, Yukang and Li, Senqiao and Lu, Xiangyu and Liu, Ziwei and Jia, Jiaya},
+  title={Step-{DPO}: Step-wise Preference Optimization for Long-Chain Reasoning of {LLMs}},
+  author={Lai, Xin and Tian, Zhuotao and Chen, Yukang and Yang, Senqiao and Peng, Xiangru and Jia, Jiaya},
   journal={arXiv preprint arXiv:2406.18629},
   year={2024}
+}
+
+% === LoRA ===
+@article{hu2022lora,
+  title={{LoRA}: Low-Rank Adaptation of Large Language Models},
+  author={Hu, Edward J. and Shen, Yelong and Wallis, Phillip and Allen-Zhu, Zeyuan and Li, Yuanzhi and Wang, Shean and Wang, Lu and Chen, Weizhu},
+  journal={ICLR},
+  year={2022},
+  note={arXiv:2106.09685}
 }
 
 % === QLoRA ===
@@ -58,6 +68,15 @@
   author={Dettmers, Tim and Pagnoni, Artidoro and Holtzman, Ari and Zettlemoyer, Luke},
   journal={NeurIPS},
   year={2023}
+}
+
+% === Inference ===
+@article{kwon2023vllm,
+  title={Efficient Memory Management for Large Language Model Serving with {PagedAttention}},
+  author={Kwon, Woosuk and Li, Zhuohan and Zhuang, Siyuan and Sheng, Ying and Zheng, Lianmin and Yu, Cody Hao and Gonzalez, Joseph E. and Zhang, Hao and Stoica, Ion},
+  journal={SOSP},
+  year={2023},
+  note={arXiv:2309.06180}
 }
 
 % === Benchmarks ===
@@ -69,21 +88,41 @@
 }
 
 % === Qwen ===
-@article{qwen3_2026,
+@article{qwen3_2025,
   title={{Qwen3} Technical Report},
   author={{Qwen Team}},
-  journal={arXiv preprint},
-  year={2026}
+  journal={arXiv preprint arXiv:2505.09388},
+  year={2025}
 }
 
 % === Statistical methods ===
 @article{demsar2006,
-  title={Statistical Comparisons of Classifiers over Multiple Datasets},
+  title={Statistical Comparisons of Classifiers over Multiple Data Sets},
   author={Dem\v{s}ar, Janez},
   journal={Journal of Machine Learning Research},
   volume={7},
   pages={1--30},
   year={2006}
+}
+
+@article{mcnemar1947,
+  title={Note on the Sampling Error of the Difference Between Correlated Proportions or Percentages},
+  author={McNemar, Quinn},
+  journal={Psychometrika},
+  volume={12},
+  number={2},
+  pages={153--157},
+  year={1947}
+}
+
+@article{benjamini1995,
+  title={Controlling the False Discovery Rate: A Practical and Powerful Approach to Multiple Testing},
+  author={Benjamini, Yoav and Hochberg, Yosef},
+  journal={Journal of the Royal Statistical Society: Series B},
+  volume={57},
+  number={1},
+  pages={289--300},
+  year={1995}
 }
 
 % === Self-correction ===
@@ -97,22 +136,22 @@
 
 % === Data for DPO ===
 @article{datasalgorithm2025,
-  title={When Data is the Algorithm: Understanding Preference Datasets through the Lens of Implicit Reward Functions},
-  author={Khaki, Saeed and Li, Ge and Ghosh, Suman},
+  title={When Data is the Algorithm: A Systematic Study and Curation of Preference Optimization Datasets},
+  author={Djuhera, Aladin and Ahmed, Farhan and Kadhe, Swanand Ravindra and Zawad, Syed and Ludwig, Heiko and Boche, Holger},
   journal={arXiv preprint arXiv:2511.10985},
   year={2025}
 }
 
 @article{unpackingdpo2024,
-  title={Unpacking {DPO} and {PPO}: Disentangling Best Practices for Learning from Preferences},
+  title={Unpacking {DPO} and {PPO}: Disentangling Best Practices for Learning from Preference Feedback},
   author={Ivison, Hamish and Wang, Yizhong and Liu, Jiacheng and Wu, Zeqiu and Pyatkin, Valentina and Lambert, Nathan and Smith, Noah A. and Choi, Yejin and Hajishirzi, Hannaneh},
   journal={arXiv preprint arXiv:2406.09279},
   year={2024}
 }
 
 @article{whatmatters2025,
-  title={What Matters in Data for {DPO}: A Study of Preference Data Construction},
-  author={Liu, Tianqi and Zhao, Yao and Joshi, Rishabh and Khalman, Misha and Saleh, Mohammad and Liu, Peter J. and Liu, Jialu},
+  title={What Matters in Data for {DPO}?},
+  author={Pan, Yu and Cai, Zhongze and Chen, Guanting and Zhong, Huaiyang and Wang, Chonghuan},
   journal={arXiv preprint arXiv:2508.18312},
   year={2025}
 }
@@ -133,8 +172,8 @@
 }
 
 @article{omegaprm2024,
-  title={{OmegaPRM}: Improve Mathematical Reasoning in Language Models by Automated Process Supervision},
-  author={Luo, Liangchen and Xu, Yifeng and Liu, Yifan and Liang, Xiaodan and Ma, Yefeng and Chen, Yuke},
+  title={Improve Mathematical Reasoning in Language Models by Automated Process Supervision},
+  author={Luo, Liangchen and Liu, Yinxiao and Liu, Rosanne and Phatale, Samrat and Guo, Meiqi and Lara, Harsh and Li, Yunxuan and Shu, Lei and Zhu, Yun and Meng, Lei and Sun, Jiao and Rastogi, Abhinav},
   journal={arXiv preprint arXiv:2406.06592},
   year={2024}
 }
