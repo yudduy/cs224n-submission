@@ -1,0 +1,81 @@
+{
+  "models": {
+    "base": {
+      "model_name": "base",
+      "model_dir": "ablation_sft_base",
+      "n_problems": 500,
+      "pass_at_1": 0.76,
+      "pass_at_4": 0.0,
+      "n_correct_pass1": 380,
+      "n_correct_pass4": 0,
+      "mean_gen_len_greedy": 1840.598,
+      "median_gen_len_greedy": 1368,
+      "eval_time_load_s": 50.49479031562805,
+      "eval_time_greedy_s": 76.83758592605591,
+      "eval_time_pass4_s": 0.0,
+      "eval_time_total_s": 127.33237624168396,
+      "temperature_stochastic": 0.7,
+      "n_samples_pass4": 4,
+      "timestamp_utc": "2026-03-13T18:10:43.040892"
+    },
+    "neutralized_cond2": {
+      "model_name": "neutralized_cond2",
+      "model_dir": "ablation_models/neutralized_rhetoric",
+      "n_problems": 500,
+      "pass_at_1": 0.74,
+      "pass_at_4": 0.0,
+      "n_correct_pass1": 370,
+      "n_correct_pass4": 0,
+      "mean_gen_len_greedy": 2387.8,
+      "median_gen_len_greedy": 1856,
+      "eval_time_load_s": 32.28170967102051,
+      "eval_time_greedy_s": 93.01615309715271,
+      "eval_time_pass4_s": 0.0,
+      "eval_time_total_s": 125.29786276817322,
+      "temperature_stochastic": 0.7,
+      "n_samples_pass4": 4,
+      "timestamp_utc": "2026-03-13T18:27:49.789986"
+    },
+    "neutralized_noprefix_cond2": {
+      "model_name": "neutralized_noprefix_cond2",
+      "model_dir": "ablation_models/no_prefix",
+      "n_problems": 500,
+      "pass_at_1": 0.758,
+      "pass_at_4": 0.0,
+      "n_correct_pass1": 379,
+      "n_correct_pass4": 0,
+      "mean_gen_len_greedy": 2004.282,
+      "median_gen_len_greedy": 1488,
+      "eval_time_load_s": 25.62954354286194,
+      "eval_time_greedy_s": 82.15103673934937,
+      "eval_time_pass4_s": 0.0,
+      "eval_time_total_s": 107.7805802822113,
+      "temperature_stochastic": 0.7,
+      "n_samples_pass4": 4,
+      "timestamp_utc": "2026-03-13T18:43:18.432137"
+    }
+  },
+  "head_to_head": {},
+  "mcnemar": {
+    "neutralized_cond2_vs_base": {
+      "model_a": "neutralized_cond2",
+      "model_b": "base",
+      "n_shared": 500,
+      "a_right_b_wrong": 21,
+      "a_wrong_b_right": 31,
+      "n_discordant": 52,
+      "p_value": 0.21160856876151612,
+      "p_value_bh": 0.42321713752303225
+    },
+    "neutralized_noprefix_cond2_vs_base": {
+      "model_a": "neutralized_noprefix_cond2",
+      "model_b": "base",
+      "n_shared": 500,
+      "a_right_b_wrong": 23,
+      "a_wrong_b_right": 24,
+      "n_discordant": 47,
+      "p_value": 1.0,
+      "p_value_bh": 1.0
+    }
+  }
+}

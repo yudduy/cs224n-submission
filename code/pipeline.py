@@ -31,7 +31,9 @@ from pathlib import Path
 import numpy as np
 
 
+# ═══════════════════════════════════════════════════════════════════
 # Answer Extraction & Verification
+# ═══════════════════════════════════════════════════════════════════
 
 def extract_boxed(text: str) -> str | None:
     """Extract content from \\boxed{...} with balanced brace matching."""
@@ -96,14 +98,18 @@ def is_equiv(pred: str | None, gt: str | None) -> bool:
     """Check mathematical equivalence. Handles numeric, fraction, LaTeX forms."""
     if pred is None or gt is None:
         return False
+    # Direct string match
     p, g = pred.strip(), gt.strip()
     if p == g:
         return True
+    # Normalize and compare
     pn, gn = normalize_latex(p), normalize_latex(g)
     if pn == gn:
         return True
+    # Numeric comparison
     def to_float(s):
         s = s.replace(",", "").strip()
+        # Handle fractions like "3/4"
         m = re.match(r"^\(?(-?\d+(?:\.\d+)?)\)?\s*/\s*\(?(-?\d+(?:\.\d+)?)\)?$", s)
         if m:
             num, den = float(m.group(1)), float(m.group(2))
@@ -119,6 +125,7 @@ def is_equiv(pred: str | None, gt: str | None) -> bool:
             return True
         if gf != 0 and abs((pf - gf) / gf) < 1e-4:
             return True
+    # Try sympy as last resort
     try:
         from sympy import simplify, sympify
         from sympy.parsing.latex import parse_latex
@@ -135,13 +142,18 @@ def is_equiv(pred: str | None, gt: str | None) -> bool:
     return False
 
 
+# ═══════════════════════════════════════════════════════════════════
 # Text Segmentation (semantic, not fixed-token)
+# ═══════════════════════════════════════════════════════════════════
 
 def segment_text(text: str) -> list[tuple[int, int]]:
-    """Segment by \\n\\n boundaries, falling back to sentence punctuation."""
+    """Segment text by \\n\\n boundaries. Returns list of (start, end) char positions.
+    Falls back to sentence-ending punctuation if no \\n\\n found."""
     segments = []
+    # Split by \n\n
     parts = re.split(r"(\n\n)", text)
     if len(parts) <= 1:
+        # Fallback: sentence-ending punctuation
         parts = re.split(r"(\.\s)", text)
     pos = 0
     current_start = 0
@@ -152,12 +164,15 @@ def segment_text(text: str) -> list[tuple[int, int]]:
             current_start = pos
     if current_start < len(text):
         segments.append((current_start, len(text)))
+    # Ensure at least 1 segment
     if not segments:
         segments = [(0, len(text))]
     return segments
 
 
+# ═══════════════════════════════════════════════════════════════════
 # DEEP-GRPO Pivot Identification
+# ═══════════════════════════════════════════════════════════════════
 
 class DeepGRPOPivotSelector:
     """DEEP-GRPO pivot selection per arXiv:2602.14169.
@@ -177,19 +192,27 @@ class DeepGRPOPivotSelector:
         self.is_bootstrapped = False
 
     def q_score(self, t: int, T: int) -> float:
-        """Q(t) = P_phi(success|depth) * (depth)^gamma, using midpoint (t+0.5)/T."""
+        """Compute pivot utility Q(t) for segment t out of T.
+
+        Uses midpoint depth (t+0.5)/T so segment 0 has nonzero score.
+        Previous version used t/T which made Q(0)=0 always, excluding
+        the shallowest segment from DEEP-GRPO selection.
+        """
         r_t = (t + 0.5) / max(T, 1)
         p_phi = 1.0 / (1.0 + math.exp(-(self.w * r_t + self.b)))
         depth_bias = r_t ** self.gamma
         return p_phi * depth_bias
 
     def select_pivot(self, T: int) -> int:
+        """Sample pivot segment proportional to Q(t). Returns segment index."""
         if not self.is_bootstrapped:
+            # Uniform sampling during bootstrap
             return random.randint(0, max(T - 1, 0))
         scores = [self.q_score(t, T) for t in range(T)]
         total = sum(scores)
         if total < 1e-12:
             return random.randint(0, max(T - 1, 0))
+        # Sample proportional to Q
         r = random.random() * total
         cumsum = 0.0
         for t, s in enumerate(scores):
@@ -199,17 +222,27 @@ class DeepGRPOPivotSelector:
         return T - 1
 
     def add_experience(self, depth: float, success: int, defer_refit: bool = False):
+        """Record (normalized_depth, success) for online P_phi update.
+
+        Args:
+            defer_refit: If True, accumulate data but don't auto-refit.
+                Used during bootstrap batch to prevent contamination —
+                refit should only happen via force_refit() after the
+                full bootstrap batch completes.
+        """
         self.experience.append((depth, success))
         self.n_since_refit += 1
         if not defer_refit and self.n_since_refit >= self.refit_interval and len(self.experience) >= 5:
             self._refit()
 
     def _refit(self):
+        """Refit logistic regression on experience buffer."""
         from sklearn.linear_model import LogisticRegression
 
         X = np.array([e[0] for e in self.experience]).reshape(-1, 1)
         y = np.array([e[1] for e in self.experience])
         if len(np.unique(y)) < 2:
+            # Can't fit with single class — keep current params
             self.n_since_refit = 0
             return
         clf = LogisticRegression(max_iter=200, C=1.0)
@@ -220,6 +253,7 @@ class DeepGRPOPivotSelector:
         self.n_since_refit = 0
 
     def force_refit(self):
+        """Force refit (e.g., after bootstrap batch)."""
         if len(self.experience) >= 5:
             self._refit()
 
@@ -231,7 +265,9 @@ class DeepGRPOPivotSelector:
         }
 
 
+# ═══════════════════════════════════════════════════════════════════
 # Step 0: Thinking Mode Pilot
+# ═══════════════════════════════════════════════════════════════════
 
 def run_pilot(llm, tokenizer, problems: list[dict], n_rollouts: int = 8) -> dict:
     """Compare thinking-on vs thinking-off on 20 problems."""
@@ -316,7 +352,9 @@ def run_pilot(llm, tokenizer, problems: list[dict], n_rollouts: int = 8) -> dict
     return results
 
 
+# ═══════════════════════════════════════════════════════════════════
 # Steps 1-6: Main Pipeline
+# ═══════════════════════════════════════════════════════════════════
 
 def run_pipeline(args):
     from collections import Counter, defaultdict
@@ -331,9 +369,13 @@ def run_pipeline(args):
     output_dir.mkdir(parents=True, exist_ok=True)
 
     t_start = time.time()
-    print(f"[pipeline] model={args.model} dataset={args.dataset} "
-          f"n={args.n_rollouts} K={args.n_branches} gamma={args.gamma} seed={args.seed}")
+    print(f"[pipeline] Starting ExIt pipeline")
+    print(f"  model={args.model}")
+    print(f"  dataset={args.dataset}")
+    print(f"  n_rollouts={args.n_rollouts}, n_branches={args.n_branches}")
+    print(f"  gamma={args.gamma}, seed={args.seed}")
 
+    # ── Load dataset ──
     print("\n[Step 0] Loading dataset...")
     ds = load_dataset(args.dataset, split="test")
     problems = []
@@ -346,11 +388,13 @@ def run_pipeline(args):
             "subject": row.get("subject", ""),
             "level": row.get("level", ""),
         })
+    # Limit for smoke test
     if args.smoke_test:
         problems = problems[:5]
     print(f"  Loaded {len(problems)} problems")
 
-    print("\n[Step 0] Loading model...")
+    # ── Load model ──
+    print("\n[Step 0] Loading model via vLLM...")
     llm = LLM(
         model=args.model,
         trust_remote_code=True,
@@ -361,8 +405,11 @@ def run_pipeline(args):
     )
     tokenizer = llm.get_tokenizer()
 
+    # ── Step 0: Pilot ──
     if not args.skip_pilot:
-        print("\n[Step 0] Thinking mode pilot (20 problems)")
+        print("\n" + "=" * 60)
+        print("[Step 0] Thinking mode pilot (20 problems)")
+        print("=" * 60)
         pilot_results = run_pilot(llm, tokenizer, problems, args.n_rollouts)
         with open(output_dir / "pilot_results.json", "w") as f:
             json.dump(pilot_results, f, indent=2)
@@ -374,6 +421,7 @@ def run_pipeline(args):
 
     print(f"  Mode: {'thinking_on' if enable_thinking else 'thinking_off'}")
 
+    # Set sampling params based on mode
     if enable_thinking:
         gen_sp = SamplingParams(
             n=args.n_rollouts, temperature=0.6, top_p=0.95, top_k=20,
@@ -393,8 +441,12 @@ def run_pipeline(args):
             max_tokens=args.max_tokens,
         )
 
+    # ═══════════════════════════════════════════════════════════
     # Step 1: Rollout Generation
+    # ═══════════════════════════════════════════════════════════
+    print("\n" + "=" * 60)
     print("[Step 1] Generating rollouts")
+    print("=" * 60)
 
     rollout_path = output_dir / "rollouts.jsonl"
     if rollout_path.exists() and not args.force:
@@ -479,27 +531,45 @@ def run_pipeline(args):
         la = level_acc[lev]
         print(f"    Level {lev}: {la['correct']}/{la['total']} = {la['correct']/max(la['total'],1):.3f}")
 
+    # ═══════════════════════════════════════════════════════════
     # Step 2: Goldilocks Filtering
+    # ═══════════════════════════════════════════════════════════
+    print("\n" + "=" * 60)
     print("[Step 2] Goldilocks filtering")
+    print("=" * 60)
 
     goldilocks = [r for r in rollout_data
                   if 1 <= r["n_correct"] <= (r["n_rollouts"] - 1)]
     print(f"  Goldilocks: {len(goldilocks)}/{len(rollout_data)} "
           f"({100 * len(goldilocks) / len(rollout_data):.1f}%)")
+    print(f"  Distribution of n_correct in goldilocks:")
     dist = Counter(r["n_correct"] for r in goldilocks)
-    print(f"  n_correct distribution: {dict(sorted(dist.items()))}")
+    for k in sorted(dist):
+        print(f"    {k} correct: {dist[k]} problems")
 
+    # ═══════════════════════════════════════════════════════════
+    # Helper: strip thinking tags from prefix for correction prompts
+    # ═══════════════════════════════════════════════════════════
     def strip_thinking_from_prefix(text: str) -> str:
-        """Remove <think>...</think> blocks from prefix text."""
+        """Remove <think>...</think> blocks from prefix text.
+        If thinking is enabled, the prefix includes thinking content which
+        should NOT be included in correction prompts (model would see its
+        own internal deliberation as context)."""
         if not enable_thinking:
             return text
+        # Remove complete think blocks
         cleaned = re.sub(r"<think>.*?</think>", "", text, flags=re.DOTALL)
+        # Remove unclosed think block at end
         if "<think>" in cleaned:
             cleaned = cleaned[:cleaned.rfind("<think>")]
         return cleaned.strip()
 
     def build_correction_prompt(problem_text: str, prefix: str) -> str:
-        """Build correction prompt: ChatML prefix + partial response + transition."""
+        """Build a well-formed correction prompt.
+        chat_template(add_generation_prompt=True) produces:
+          <|im_start|>user\n{problem}<|im_end|>\n<|im_start|>assistant\n
+        We append the model's partial response + transition.
+        This is standard vLLM prefix-constrained generation."""
         msgs = [{"role": "user", "content": problem_text}]
         chat_prefix = tokenizer.apply_chat_template(
             msgs, tokenize=False, add_generation_prompt=True,
@@ -509,6 +579,7 @@ def run_pipeline(args):
         transition = "\n\nWait, let me reconsider this step.\n\n"
         return chat_prefix + clean_prefix + transition
 
+    # Helper: extract answer from potentially thinking-tagged output
     def extract_clean_answer(text: str) -> str | None:
         clean = text
         if "<think>" in text:
@@ -517,22 +588,28 @@ def run_pipeline(args):
                 clean = text[think_end + len("</think>"):]
         return extract_answer(clean)
 
+    # SamplingParams for correction/baseline generation
     branch_gen_sp = SamplingParams(
         n=args.n_branches,  # generate K branches per prompt in one call
         temperature=gen_sp.temperature,
         top_p=gen_sp.top_p,
-        top_k=gen_sp.top_k,
+        top_k=getattr(gen_sp, 'top_k', 20),
         max_tokens=args.max_tokens,
     )
     single_sp = SamplingParams(
         n=1,
         temperature=gen_sp.temperature,
         top_p=gen_sp.top_p,
-        top_k=gen_sp.top_k,
+        top_k=getattr(gen_sp, 'top_k', 20),
         max_tokens=args.max_tokens,
     )
 
-    print("\n[Steps 3-6] Pivot identification + correction generation")
+    # ═══════════════════════════════════════════════════════════
+    # Steps 3-6: Batched Pivot + Correction (with online P_phi)
+    # ═══════════════════════════════════════════════════════════
+    print("\n" + "=" * 60)
+    print("[Steps 3-6] Batched pivot identification + correction generation")
+    print("=" * 60)
 
     pivot_selector = DeepGRPOPivotSelector(gamma=args.gamma)
     pivot_data = []
@@ -581,7 +658,7 @@ def run_pipeline(args):
         pivot_data.extend(batch_pivots)
 
         # Step 5: Generate corrections for this batch
-        # Use n=n_branches per unique prompt (GPU batch optimization)
+        # Use n=n_branches per unique prompt (GPU optimization from Codex review)
         batch_prompts = []
         batch_pivot_refs = []  # one per unique prompt
         for pv in batch_pivots:
@@ -696,7 +773,9 @@ def run_pipeline(args):
         print(f"  Problems with any correct: "
               f"{sum(1 for y in yields_per_problem if y > 0)}/{len(yields_per_problem)}")
 
+    # ═══════════════════════════════════════════════════════════
     # Instrumentation: depth histogram, yield-by-depth, yield-per-token
+    # ═══════════════════════════════════════════════════════════
     depth_bins = [(i / 10, (i + 1) / 10) for i in range(10)]  # 0.0-0.1, ..., 0.9-1.0
     depth_histogram = {f"{lo:.1f}-{hi:.1f}": 0 for lo, hi in depth_bins}
     yield_by_depth = {f"{lo:.1f}-{hi:.1f}": {"correct": 0, "total": 0} for lo, hi in depth_bins}
@@ -723,8 +802,12 @@ def run_pipeline(args):
     print(f"  Effective yield (yield × depth): {effective_yield:.4f}")
     print(f"  Total generated tokens: {total_generated_tokens}")
 
+    # ═══════════════════════════════════════════════════════════
     # Step 4: Divergence Analysis (post-hoc, uses all data)
+    # ═══════════════════════════════════════════════════════════
+    print("\n" + "=" * 60)
     print("[Step 4] Divergence analysis (pivot vs actual diff)")
+    print("=" * 60)
 
     diff_data = []
     for g in goldilocks:
@@ -776,14 +859,18 @@ def run_pipeline(args):
     else:
         print("  No pairs to analyze")
 
+    # ═══════════════════════════════════════════════════════════
     # Baseline Comparisons (skip with --skip-baselines)
+    # ═══════════════════════════════════════════════════════════
     baseline_results = {}
 
     if args.skip_baselines:
         print("\n[Eval] Skipping baselines (--skip-baselines)")
 
     if not args.skip_baselines:
+        print("\n" + "=" * 60)
         print("[Eval] Baseline comparisons")
+        print("=" * 60)
 
         # Random position baseline: resample from random segment positions
         random_prompts = []
@@ -940,7 +1027,9 @@ def run_pipeline(args):
             print(f"  {baseline_name}: {bl_yield:.3f} "
                   f"({n_bl_correct}/{n_bl_total})")
 
+    # ═══════════════════════════════════════════════════════════
     # Save Final Summary
+    # ═══════════════════════════════════════════════════════════
     t_total = time.time() - t_start
 
     # Per-level analysis
@@ -1040,7 +1129,9 @@ def run_pipeline(args):
     }
 
     # Print kill criteria
+    print("\n" + "=" * 60)
     print("[Eval] Kill criteria check")
+    print("=" * 60)
     kc = summary["kill_criteria"]
     print(f"  yield < 5%: {kc['yield_lt_5pct']} (yield={yield_rate:.3f})")
     print(f"  pivot ≈ random: {kc['pivot_eq_random']}")
@@ -1075,7 +1166,9 @@ def run_pipeline(args):
     return summary
 
 
+# ═══════════════════════════════════════════════════════════════════
 # CLI
+# ═══════════════════════════════════════════════════════════════════
 
 def main():
     parser = argparse.ArgumentParser(description="ExIt Pipeline: DEEP-GRPO + Correction Generation")

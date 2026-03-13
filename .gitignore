@@ -1,0 +1,19 @@
+# LaTeX build artifacts
+*.aux
+*.bbl
+*.blg
+*.log
+*.out
+*.synctex.gz
+*.fdb_latexmk
+*.fls
+
+# HTML preview
+paper_preview.html
+
+# OS
+.DS_Store
+
+# Python
+__pycache__/
+*.pyc
